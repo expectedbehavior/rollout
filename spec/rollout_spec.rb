@@ -2,14 +2,15 @@ require File.expand_path(File.dirname(__FILE__) + '/spec_helper')
 
 describe "Rollout" do
   before do
-    @redis   = Redis.new
-    @rollout = Rollout.new(@redis)
+    @redis = Redis.new
+    @memcache = Memcached::Rails.new($memcache_config[:servers])
+    @rollout = Rollout.new(@redis, @memcache)
   end
 
   describe "when a group is activated" do
     before do
       @rollout.define_group(:fivesonly) { |user| user.id == 5 }
-      @rollout.activate_group(:chat, :fivesonly)
+      @rollout.activate_group(:chat, :fivesonly)      
     end
 
     it "the feature is active for users for which the block evaluates to true" do
@@ -24,8 +25,13 @@ describe "Rollout" do
       @rollout.activate_group(:chat, :fake)
       @rollout.should_not be_active(:chat, stub(:id => 1))
     end
+    
+    it "should update the cache" do
+      @rollout.should_receive(:update_cache_for_key).with(@rollout.send(:group_key, :chat))
+      @rollout.activate_group(:chat, :fake)
+    end
   end
-
+  
   describe "the default all group" do
     before do
       @rollout.activate_group(:chat, :all)
@@ -51,6 +57,11 @@ describe "Rollout" do
     it "leaves the other groups active" do
       @rollout.should be_active(:chat, stub(:id => 5))
     end
+
+    it "should update the cache" do
+      @rollout.should_receive(:update_cache_for_key).with(@rollout.send(:group_key, :chat))
+      @rollout.deactivate_group(:chat, :all)
+    end
   end
 
   describe "deactivating a feature completely" do
@@ -74,6 +85,13 @@ describe "Rollout" do
     it "removes the percentage" do
       @rollout.should_not be_active(:chat, stub(:id => 24))
     end
+
+    it "should delete the keys from the cache" do
+      @rollout.should_receive(:expire_cache_for_key).with(@rollout.send(:group_key, :chat))
+      @rollout.should_receive(:expire_cache_for_key).with(@rollout.send(:user_key, :chat))
+      @rollout.should_receive(:expire_cache_for_key).with(@rollout.send(:percentage_key, :chat))
+      @rollout.deactivate_all(:chat)
+    end
   end
 
   describe "activating a specific user" do
@@ -87,6 +105,11 @@ describe "Rollout" do
 
     it "remains inactive for other users" do
       @rollout.should_not be_active(:chat, stub(:id => 24))
+    end
+
+    it "should update the cache" do
+      @rollout.should_receive(:update_cache_for_key).with(@rollout.send(:user_key, :chat))
+      @rollout.activate_user(:chat, stub(:id => 24))
     end
   end
 
@@ -104,6 +127,11 @@ describe "Rollout" do
     it "remains active for other active users" do
       @rollout.should be_active(:chat, stub(:id => 24))
     end
+
+    it "should update the cache" do
+      @rollout.should_receive(:update_cache_for_key).with(@rollout.send(:user_key, :chat))
+      @rollout.deactivate_user(:chat, stub(:id => 24))
+    end
   end
 
   describe "activating a feature for a percentage of users" do
@@ -113,6 +141,11 @@ describe "Rollout" do
 
     it "activates the feature for that percentage of the users" do
       (1..120).select { |id| @rollout.active?(:chat, stub(:id => id)) }.length.should == 39
+    end
+
+    it "should update the cache" do
+      @rollout.should_receive(:update_cache_for_key).with(@rollout.send(:percentage_key, :chat), :string)
+      @rollout.activate_percentage(:chat, 20)
     end
   end
 
@@ -145,6 +178,99 @@ describe "Rollout" do
 
     it "becomes inactivate for all users" do
       @rollout.should_not be_active(:chat, stub(:id => 24))
+    end
+    
+    it "should delete the key from the cache" do
+      @rollout.should_receive(:expire_cache_for_key).with(@rollout.send(:percentage_key, :chat))
+      @rollout.deactivate_percentage(:chat)
+    end
+  end
+  
+  describe 'updating a cache' do
+    before(:each) do
+      @redis = mock(:redis)
+      @rollout = Rollout.new(@redis, @memcache)
+    end
+    context 'for groups' do
+      before(:each) do
+        @key = @rollout.send(:group_key, :test)
+        @set = ['test']
+      end
+
+      it "should get the members of the set from redis" do
+        @redis.should_receive(:smembers).with(@key).and_return(@set)
+        @rollout.send(:update_cache_for_key, @key)
+      end
+      
+      it "should write the members to the cache" do
+        @redis.stub!(:smembers).and_return(@set)
+        @memcache.should_receive(:set).with(@key, @set, anything)
+        @rollout.send(:update_cache_for_key, @key)
+      end
+    end
+
+    context 'for users' do
+      before(:each) do
+        @key = @rollout.send(:user_key, :test)
+        @set = ['test']
+      end
+
+      it "should get the members of the set from redis" do
+        @redis.should_receive(:smembers).with(@key).and_return(@set)
+        @rollout.send(:update_cache_for_key, @key)
+      end
+
+      it "should write the members to the cache" do
+        @redis.stub!(:smembers).and_return(@set)
+        @memcache.should_receive(:set).with(@key, @set, anything)
+        @rollout.send(:update_cache_for_key, @key)
+      end
+    end
+
+    context 'for a percentage' do
+      before(:each) do
+        @key = @rollout.send(:percentage_key, :test)
+        @percentage = 50
+      end
+
+      it "should get the percentage from redis" do
+        @redis.should_receive(:get).with(@key).and_return(0)
+        @rollout.send(:update_cache_for_key, @key, :string)
+      end
+
+      it "should write the members to the cache" do
+        @redis.stub!(:get).and_return(@percentage)
+        @memcache.should_receive(:set).with(@key, @percentage, anything)
+        @rollout.send(:update_cache_for_key, @key, :string)
+      end
+    end
+  end
+  
+  describe 'get from cache' do
+    before(:each) do
+      @key = @rollout.send(:group_key, :test)
+    end
+
+    it "should attempt to get the value from memcache" do
+      @memcache.should_receive(:get_orig).with(@key)
+      @rollout.send(:get_from_cache, @key)
+    end
+    
+    it "should update the cache on a miss" do
+      @memcache.stub!(:get_orig).with(@key).and_raise(Memcached::NotFound)
+      @rollout.should_receive(:update_cache_for_key).with(@key, :set)
+      @rollout.send(:get_from_cache, @key)
+    end    
+  end
+
+  describe 'expire the cache' do
+    before(:each) do
+      @key = @rollout.send(:group_key, :test)
+    end
+
+    it "should delete the key from memcache" do
+      @memcache.should_receive(:delete).with(@key)
+      @rollout.send(:expire_cache_for_key, @key)
     end
   end
 end
