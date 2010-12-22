@@ -1,10 +1,12 @@
 class Rollout
+  attr_accessor :namespace
+
   def initialize(redis, memcache=nil)
     @redis  = redis
     @memcache = memcache
     @groups = {"all" => lambda { |user| true }}
   end
-
+  
   def activate_group(feature, group)
     key = group_key(feature)
     @redis.sadd(key, group)
@@ -61,8 +63,9 @@ class Rollout
   end
 
   private
+  
     def key(name)
-      "feature:#{name}"
+      [namespace, 'feature', name].compact.join(':')
     end
 
     def group_key(name)

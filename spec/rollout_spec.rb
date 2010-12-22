@@ -343,5 +343,29 @@ describe "Rollout" do
       @rollout.send(:user_within_active_percentage?, :chat, stub(:id => 5))
     end
   end
+  
+  describe 'key' do
+    context 'with a namesapce' do
+      before(:each) do
+        @rollout.namespace = 'test'
+      end
+
+      it "should include the namespace" do
+        @rollout.send(:key, 'chat').should match(/^test:\w*:\w*$/)
+      end
+    end
+
+
+    context 'without a namespace' do
+      before(:each) do
+        @rollout.namespace = nil
+      end
+      
+      it "should not include a namespace" do
+        @rollout.send(:key, 'chat').should match(/^\w*:\w*$/)
+      end
+    end
+
+  end
 
 end
