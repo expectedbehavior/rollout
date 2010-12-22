@@ -273,4 +273,75 @@ describe "Rollout" do
       @rollout.send(:expire_cache_for_key, @key)
     end
   end
+  
+  describe 'user in active groups' do
+    before(:each) do
+      @redis = mock(:redis)
+      @rollout = Rollout.new(@redis, @memcache)
+      @key = @rollout.send(:group_key, :chat)
+      @redis.stub!(:sadd).with(@key, :fivesonly)
+      @redis.stub!(:smembers).with(@key).and_return(['fivesonly'])
+      @rollout.activate_group(:chat, :fivesonly)
+    end
+    
+    it "should use the cached valued" do
+      @memcache.should_receive(:get_orig).with(@key).and_return(['fivesonly'])
+      @redis.should_not_receive(:smembers).with(@key)
+      @rollout.send(:user_in_active_group?, :chat, stub(:id => 5))
+    end
+    
+    it "should fallback to the redis value" do
+      @memcache.should_receive(:get_orig).with(@key).and_return(nil)
+      @redis.should_receive(:smembers).with(@key).and_return(['fivesonly'])
+      @rollout.send(:user_in_active_group?, :chat, stub(:id => 5))
+    end
+  end
+
+  describe 'user active' do
+    before(:each) do
+      @redis = mock(:redis)
+      @rollout = Rollout.new(@redis, @memcache)
+      @key = @rollout.send(:user_key, :chat)
+      @redis.stub!(:sadd).with(@key, 5)
+      @redis.stub!(:sismember).with(@key, 5).and_return(true)
+      @redis.stub!(:smembers).with(@key).and_return(['5'])
+      @rollout.activate_user(:chat, stub(:id => 5))
+    end
+    
+    it "should use the cached valued" do
+      @memcache.should_receive(:get_orig).with(@key).and_return(['5'])
+      @redis.should_not_receive(:smembers).with(@key)
+      @rollout.send(:user_active?, :chat, stub(:id => 5))
+    end
+    
+    it "should fallback to the redis value" do
+      @memcache.should_receive(:get_orig).with(@key).and_raise(Memcached::NotFound)
+      @redis.should_receive(:smembers).with(@key).and_return(['5'])
+      @rollout.send(:user_active?, :chat, stub(:id => 5))
+    end
+  end
+  
+  describe 'user within active percentage' do
+    before(:each) do
+      @redis = mock(:redis)
+      @rollout = Rollout.new(@redis, @memcache)
+      @key = @rollout.send(:percentage_key, :chat)
+      @redis.stub!(:set).with(@key, 50)
+      @redis.stub!(:get).with(@key).and_return(50)
+      @rollout.activate_percentage(:chat, 50)
+    end
+    
+    it "should use the cached valued" do
+      @memcache.should_receive(:get_orig).with(@key).and_return('50')
+      @redis.should_not_receive(:get).with(@key)
+      @rollout.send(:user_within_active_percentage?, :chat, stub(:id => 5))
+    end
+    
+    it "should fallback to the redis value" do
+      @memcache.should_receive(:get_orig).with(@key).and_raise(Memcached::NotFound)
+      @redis.should_receive(:get).with(@key).and_return('50')
+      @rollout.send(:user_within_active_percentage?, :chat, stub(:id => 5))
+    end
+  end
+
 end
