@@ -10,7 +10,7 @@ describe "Rollout" do
   describe "when a group is activated" do
     before do
       @rollout.define_group(:fivesonly) { |user| user.id == 5 }
-      @rollout.activate_group(:chat, :fivesonly)      
+      @rollout.activate_group(:chat, :fivesonly)  
     end
 
     it "the feature is active for users for which the block evaluates to true" do
@@ -359,6 +359,35 @@ describe "Rollout" do
       @memcache.should_receive(:get_orig).with(@key).and_raise(Memcached::NotFound)
       @redis.should_receive(:get).with(@key).and_return('50')
       @rollout.send(:user_within_active_percentage?, :chat, stub(:id => 5))
+    end
+  end
+  
+  describe 'within active percentage of time' do
+    before(:each) do
+      @time = 1303745009
+      @redis = mock(:redis)
+      @rollout = Rollout.new(@redis, @memcache)
+      @key = @rollout.send(:percentage_of_time_key, :chat)
+      @redis.stub!(:set).with(@key, 10)
+      @redis.stub!(:get).with(@key).and_return(10)
+      @rollout.activate_percentage_of_time(:chat, 10)
+    end
+    
+    it "should use the cached valued" do
+      @redis.should_not_receive(:get).with(@key)
+      @memcache.should_receive(:get_orig).with(@key).and_return('10')
+      @rollout.send(:within_active_percentage_of_time?, :chat, @time).should == true
+      @memcache.should_receive(:get_orig).with(@key).and_return('10')
+      @rollout.send(:within_active_percentage_of_time?, :chat, @time+2).should == false
+    end
+    
+    it "should fallback to the redis value" do
+      @memcache.should_receive(:get_orig).with(@key).and_raise(Memcached::NotFound)
+      @redis.should_receive(:get).with(@key).and_return('10')
+      @rollout.send(:within_active_percentage_of_time?, :chat, @time).should == true
+      @memcache.should_receive(:get_orig).with(@key).and_raise(Memcached::NotFound)
+      @redis.should_receive(:get).with(@key).and_return('10')
+      @rollout.send(:within_active_percentage_of_time?, :chat, @time+2).should == false
     end
   end
   

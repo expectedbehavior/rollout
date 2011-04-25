@@ -45,9 +45,10 @@ class Rollout
   end
 
   def active?(feature, user)
-    user_in_active_group?(feature, user) ||
-      user_active?(feature, user) ||
-        user_within_active_percentage?(feature, user)
+    (user_in_active_group?(feature, user) ||
+     user_active?(feature, user) ||
+     user_within_active_percentage?(feature, user)) &&
+      within_active_percentage_of_time?(feature, Time.now)
   end
 
   def activate_percentage(feature, percentage)
@@ -61,7 +62,19 @@ class Rollout
     @redis.del(key)
     expire_cache_for_key(key)
   end
-  
+
+  def activate_percentage_of_time(feature, percentage)
+    key = percentage_of_time_key(feature)
+    @redis.set(key, percentage)
+    update_cache_for_key(key, :string)
+  end
+
+  def deactivate_percentage_of_time(feature)
+    key = percentage_of_time_key(feature)
+    @redis.del(key)
+    expire_cache_for_key(key)
+  end
+
   def get_value(name)
     key = value_key(name)
     if value = get_from_cache(key, :string) || @redis.get(key)
@@ -91,6 +104,10 @@ class Rollout
 
     def percentage_key(name)
       "#{key(name)}:percentage"
+    end
+  
+    def percentage_of_time_key(name)
+      "#{key(name)}:time_percentage"
     end
   
     def value_key(name)
@@ -128,6 +145,17 @@ class Rollout
           return false
         end
         user.id % 100 < percentage.to_i
+      end
+    end
+  
+    #this is by default true, so that you can mix it with other types
+    # like "active for 90% of users 10% of the time"
+    def within_active_percentage_of_time?(feature, time)
+      key = percentage_of_time_key(feature)
+      if percentage = get_from_cache(key, :string) || @redis.get(key)
+        #this is by default true
+        return true if percentage == nil || percentage == :nil
+        time.to_i % 100 < percentage.to_i
       end
     end
 
