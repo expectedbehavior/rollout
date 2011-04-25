@@ -244,6 +244,24 @@ describe "Rollout" do
         @rollout.send(:update_cache_for_key, @key, :string)
       end
     end
+    
+    context 'for a value' do
+      before(:each) do
+        @key = @rollout.send(:value_key, :test)
+        @value = 10
+      end
+
+      it "should get the value from redis" do
+        @redis.should_receive(:get).with(@key).and_return(0)
+        @rollout.send(:update_cache_for_key, @key, :string)
+      end
+
+      it "should write the value to the cache" do
+        @redis.stub!(:get).and_return(@value)
+        @memcache.should_receive(:set).with(@key, @value, anything)
+        @rollout.send(:update_cache_for_key, @key, :string)
+      end
+    end
   end
   
   describe 'get from cache' do
@@ -341,6 +359,29 @@ describe "Rollout" do
       @memcache.should_receive(:get_orig).with(@key).and_raise(Memcached::NotFound)
       @redis.should_receive(:get).with(@key).and_return('50')
       @rollout.send(:user_within_active_percentage?, :chat, stub(:id => 5))
+    end
+  end
+  
+  describe 'stored value for feature' do
+    before(:each) do
+      @redis = mock(:redis)
+      @rollout = Rollout.new(@redis, @memcache)
+      @key = @rollout.send(:value_key, :chat)
+      @redis.stub!(:set).with(@key, 50)
+      @redis.stub!(:get).with(@key).and_return(50)
+      @rollout.store_value(:chat, 50)
+    end
+    
+    it "should use the cached valued" do
+      @memcache.should_receive(:get_orig).with(@key).and_return('50')
+      @redis.should_not_receive(:get).with(@key)
+      @rollout.send(:get_value, :chat).should == "50"
+    end
+    
+    it "should fallback to the redis value" do
+      @memcache.should_receive(:get_orig).with(@key).and_raise(Memcached::NotFound)
+      @redis.should_receive(:get).with(@key).and_return('50')
+      @rollout.send(:get_value, :chat).should == "50"
     end
   end
   

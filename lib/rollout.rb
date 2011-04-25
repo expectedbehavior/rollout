@@ -61,6 +61,19 @@ class Rollout
     @redis.del(key)
     expire_cache_for_key(key)
   end
+  
+  def get_value(name)
+    key = value_key(name)
+    if value = get_from_cache(key, :string) || @redis.get(key)
+      value == :nil ? nil : value
+    end
+  end
+  
+  def store_value(name, value)
+    key = value_key(name)
+    @redis.set(key, value)
+    update_cache_for_key(key, :string)
+  end
 
   private
   
@@ -78,6 +91,10 @@ class Rollout
 
     def percentage_key(name)
       "#{key(name)}:percentage"
+    end
+  
+    def value_key(name)
+      "#{key(name)}:value"
     end
 
     def user_in_active_group?(feature, user)
