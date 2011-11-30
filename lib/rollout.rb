@@ -23,9 +23,11 @@ class Rollout
     @redis.del(group_key(feature))
     @redis.del(user_key(feature))
     @redis.del(percentage_key(feature))
+    @redis.del(percentage_of_time_key(feature))
     expire_cache_for_key(group_key(feature))
     expire_cache_for_key(user_key(feature))
     expire_cache_for_key(percentage_key(feature))
+    expire_cache_for_key(percentage_of_time_key(feature))
   end
 
   def activate_user(feature, user)
@@ -45,9 +47,9 @@ class Rollout
   end
 
   def active?(feature, user)
-    (user_in_active_group?(feature, user) ||
-     user_active?(feature, user) ||
-     user_within_active_percentage?(feature, user)) &&
+    (user_within_active_percentage?(feature, user)||
+     user_in_active_group?(feature, user) ||
+     user_active?(feature, user)) &&
       within_active_percentage_of_time?(feature, Time.now)
   end
 
