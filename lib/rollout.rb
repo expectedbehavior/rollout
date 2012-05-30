@@ -86,8 +86,9 @@ class Rollout
   
   def store_value(name, value)
     key = value_key(name)
-    @redis.set(key, value)
-    update_cache_for_key(key, :string)
+    value.nil? ? @redis.del(key) : @redis.set(key, value)
+    value = update_cache_for_key(key, :string)
+    value == :nil ? nil : value
   end
 
   private
